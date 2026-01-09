@@ -1,0 +1,22 @@
+seed: 42
+device: "auto"      # "cuda" | "cpu" | "auto"
+
+model:
+  hf_model_id: "prithivMLmods/Deep-Fake-Detector-v2-Model"
+  fake_class_index: 1
+  cache_dir: null
+
+data:
+  test_dir: "test_data"
+  sample_submission: "sample_submission.csv"
+  image_exts: [".jpg", ".jpeg", ".png", ".jfif", ".bmp", ".webp"]
+  video_exts: [".mp4", ".mov", ".avi", ".mkv", ".webm"]
+  target_size: [224, 224]
+  num_frames: 10
+  batch_size: 32
+  num_workers: 0
+  use_padding: true
+
+output:
+  out_dir: "output"
+  out_csv: "submission.csv"
