@@ -1,22 +1,20 @@
-seed: 42
-device: "auto"      # "cuda" | "cpu" | "auto"
+test_dir: "test_data"
+out_csv: "submission.csv"
+recursive: true
 
-model:
-  hf_model_id: "prithivMLmods/Deep-Fake-Detector-v2-Model"
-  fake_class_index: 1
-  cache_dir: null
+num_frames: 16
+agg: "mean"          # "mean" or "median"
 
-data:
-  test_dir: "test_data"
-  sample_submission: "sample_submission.csv"
-  image_exts: [".jpg", ".jpeg", ".png", ".jfif", ".bmp", ".webp"]
-  video_exts: [".mp4", ".mov", ".avi", ".mkv", ".webm"]
-  target_size: [224, 224]
-  num_frames: 10
-  batch_size: 32
-  num_workers: 0
-  use_padding: true
+# 전처리
+image_size: 224
+clip_mean: [0.48145466, 0.4578275, 0.40821073]
+clip_std:  [0.26862954, 0.26130258, 0.27577711]
 
-output:
-  out_dir: "output"
-  out_csv: "submission.csv"
+# 추론 배치 (영상 프레임 배치)
+frame_batch_size: 16
+
+# 모델
+model_pt: "model/model.pt"
+
+# 출력 CSV
+csv_header: ["filename", "label"]

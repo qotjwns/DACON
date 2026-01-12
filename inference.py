@@ -1,95 +1,150 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
-from typing import Dict
 
-import numpy as np
-import pandas as pd
-from tqdm.auto import tqdm
+import torch
+import yaml
+from PIL import Image
 
-from src.dataset import preprocess_one
-from src.models import HFViTDeepfake
-from src.utils import ensure_dir, load_config, resolve_device, seed_everything
+from src.models import TorchScriptBinaryClassifier
+from src.utils import (
+    IMG_EXTS, VID_EXTS,
+    aggregate,
+    clip_preprocess,
+    iter_media,
+    read_video_frames_uniform,
+)
+
+
+def load_config(path: str | Path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def chunked(tensor: torch.Tensor, chunk_size: int):
+    for i in range(0, tensor.size(0), chunk_size):
+        yield tensor[i:i + chunk_size]
+
+
+@torch.no_grad()
+def infer_image(
+    clf: TorchScriptBinaryClassifier,
+    image_path: Path,
+    image_size: int,
+    mean,
+    std,
+) -> float:
+    img = Image.open(image_path).convert("RGB")
+    x = clip_preprocess(img, image_size, mean, std).unsqueeze(0)  # (1,3,H,W)
+    p_fake = clf.predict_fake_prob(x)[0].item()
+    return float(p_fake)
+
+
+@torch.no_grad()
+def infer_video(
+    clf: TorchScriptBinaryClassifier,
+    video_path: Path,
+    num_frames: int,
+    agg_mode: str,
+    frame_batch_size: int,
+    image_size: int,
+    mean,
+    std,
+) -> float | None:
+    frames = read_video_frames_uniform(video_path, num_frames)
+    if not frames:
+        return None
+
+    xs = [clip_preprocess(im, image_size, mean, std) for im in frames]   # list of (3,H,W)
+    x = torch.stack(xs, dim=0)                                           # (T,3,H,W)
+
+    probs = []
+    for xb in chunked(x, max(1, frame_batch_size)):
+        p_fake_b = clf.predict_fake_prob(xb).detach().cpu().tolist()
+        probs.extend(p_fake_b)
+
+    agg = aggregate([float(v) for v in probs], agg_mode)
+    return None if agg is None else float(agg)
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config/config.yaml")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--test_dir", default=None)
+    ap.add_argument("--out_csv", default=None)
+    args = ap.parse_args()
 
     cfg = load_config(args.config)
-    seed_everything(int(cfg.get("seed")))
 
-    device = resolve_device(cfg.get("device", "auto"))
+    test_dir = Path(args.test_dir) if args.test_dir else Path(cfg["test_dir"])
+    out_csv = Path(args.out_csv) if args.out_csv else Path(cfg["out_csv"])
 
-    model_cfg = cfg["model"]
-    data_cfg = cfg["data"]
-    out_cfg = cfg["output"]
+    recursive = bool(cfg.get("recursive", True))
+    num_frames = int(cfg.get("num_frames", 16))
+    agg_mode = str(cfg.get("agg", "mean"))
+    frame_batch_size = int(cfg.get("frame_batch_size", 16))
 
-    model = HFViTDeepfake(
-        model_id=model_cfg["hf_model_id"],
-        device=device,
-        fake_class_index=int(model_cfg.get("fake_class_index")),
-        cache_dir=model_cfg.get("cache_dir", None),
-    )
+    image_size = int(cfg.get("image_size", 224))
+    mean = cfg.get("clip_mean", [0.48145466, 0.4578275, 0.40821073])
+    std = cfg.get("clip_std",  [0.26862954, 0.26130258, 0.27577711])
 
-    test_dir = Path(data_cfg["test_dir"])
-    image_exts = [e.lower() for e in data_cfg.get("image_exts", [])]
-    video_exts = [e.lower() for e in data_cfg.get("video_exts", [])]
-    target_size = tuple(data_cfg.get("target_size"))
-    num_frames = int(data_cfg.get("num_frames"))
-    batch_size = int(data_cfg.get("batch_size"))
-    use_padding = bool(data_cfg.get("use_padding"))
-    print(num_frames)
-    files = sorted([p for p in test_dir.iterdir() if p.is_file()])
-    print(f"Device: {device}")
-    print(f"Test data length: {len(files)}")
-    print(f"Model: {model_cfg['hf_model_id']}")
+    model_pt = Path(cfg.get("model_pt", "model/model.pt"))
 
-    results: Dict[str, float] = {}
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("device:", device)
+    print("test_dir:", str(test_dir))
+    print("model_pt:", str(model_pt))
 
-    for file_path in tqdm(files, desc="Processing"):
-        out = preprocess_one(
-            file_path=file_path,
-            image_exts=image_exts,
-            video_exts=video_exts,
-            num_frames=num_frames,
-            target_size=target_size,
-            use_padding=use_padding,
+    if not model_pt.exists():
+        raise FileNotFoundError(
+            f"Missing model weights: {model_pt}\n"
         )
 
-        if out.error:
-            print(f"[WARN] {out.filename}: {out.error}")
-            results[out.filename] = 0.0
-            continue
+    clf = TorchScriptBinaryClassifier(model_pt=model_pt, device=device)
 
-        if not out.imgs:
-            results[out.filename] = 0.0
-            continue
+    media = sorted(list(iter_media(test_dir, recursive)))
+    print(f"found {len(media)} media files")
 
-        probs = model.predict_fake_probs(out.imgs, batch_size=batch_size)
-        results[out.filename] = float(np.mean(probs)) if probs else 0.0
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    header = cfg.get("csv_header", ["filename", "label"])
 
-    sample_path = Path(data_cfg["sample_submission"])
-    submission = pd.read_csv(sample_path)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(header)
 
-    if "filename" not in submission.columns:
-        raise ValueError("sample_submission.csv must have a 'filename' column.")
-    if "prob" not in submission.columns:
-        submission["prob"] = 0.0
+        for i, p in enumerate(media, 1):
+            ext = p.suffix.lower()
+            try:
+                if ext in IMG_EXTS:
+                    score = infer_image(clf, p, image_size, mean, std)
+                elif ext in VID_EXTS:
+                    score = infer_video(
+                        clf, p,
+                        num_frames=num_frames,
+                        agg_mode=agg_mode,
+                        frame_batch_size=frame_batch_size,
+                        image_size=image_size,
+                        mean=mean,
+                        std=std,
+                    )
+                    if score is None:
+                        print(f"[{i}/{len(media)}] {p.name}  SKIP(read fail)")
+                        continue
+                else:
+                    continue
 
-    submission["prob"] = submission["filename"].map(results).fillna(0.0)
+                fname = p.name
 
-    out_dir = Path(out_cfg["out_dir"])
-    ensure_dir(str(out_dir))
-    out_csv = out_dir / out_cfg.get("out_csv", "baseline_submission.csv")
-    submission.to_csv(out_csv, encoding="utf-8-sig", index=False)
+                w.writerow([fname, f"{score:.6f}"])
+                print(f"[{i}/{len(media)}] {p.name}  fake_prob={score:.6f}")
 
-    print(f"Inference completed. Processed: {len(results)} files")
-    print(f"Saved submission to: {out_csv}")
+            except Exception as e:
+                print(f"[{i}/{len(media)}] {p.name}  ERROR: {e}")
+
+    print("saved:", str(out_csv))
 
 
 if __name__ == "__main__":
     main()
-    
