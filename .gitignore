@@ -211,3 +211,4 @@ train_data/
 
 #result
 *.csv
+*.pt
