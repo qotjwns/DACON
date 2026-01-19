@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from src.utils import clip_preprocess
+from src.common.utils import clip_preprocess
 
 
 @dataclass

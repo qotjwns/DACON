@@ -1,4 +1,4 @@
-from src.common.utils import (  # noqa: F401
+from src.common.utils import (
     IMG_EXTS,
     VID_EXTS,
     aggregate,

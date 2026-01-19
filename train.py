@@ -20,7 +20,7 @@ def load_gend_class(repo_id: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="yermandy/GenD_CLIP_L_14")
-    ap.add_argument("--out", default="model/model.pt")
+    ap.add_argument("--out", default="model/model.vanilla.pt")
     ap.add_argument("--image_size", type=int, default=224)
     args = ap.parse_args()
 

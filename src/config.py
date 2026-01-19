@@ -42,8 +42,8 @@ class InferenceConfig:
     face_margin: float = 1.3
     face_dump_dir: Path | None = Path("output/faces")
     use_face_detector: bool = True
-    face_model_path: Path | None = None   # OpenCV DNN weight path
-    face_config_path: Path | None = None  # OpenCV DNN prototxt path
+    face_model_path: Path | None = None
+    face_config_path: Path | None = None
     face_conf_threshold: float = 0.5
 
     @classmethod
@@ -91,8 +91,7 @@ class InferenceConfig:
             raise ValueError("csv_header must contain at least filename and label columns.")
         if self.face_margin <= 0:
             raise ValueError("face_margin must be > 0.")
-        if self.use_face_detector and (self.face_model_path is None or self.face_config_path is None):
-            raise ValueError("face_model_path and face_config_path must be set when use_face_detector is true.")
+        # 얼굴 검출 설정은 없으면 자동 폴백(중앙 크롭)으로 처리하므로 경로가 없더라도 허용
         return self
 
     def resolved_device(self) -> str:

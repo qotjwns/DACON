@@ -4,9 +4,10 @@ import argparse
 from pathlib import Path
 
 from src.config import load_inference_config
-from src.face_preprocess import DnnFacePreprocessor
+from src.detectors import build_face_preprocessor
 from src.models import TorchScriptBinaryClassifier
 from src.pipeline import InferencePipeline
+from src.runner import InferenceRunner
 
 
 def main():
@@ -32,31 +33,16 @@ def main():
     if not model_pt.exists():
         raise FileNotFoundError(f"Missing model weights: {model_pt}")
 
-    face_preproc = None
-    if cfg.use_face_detector:
-        try:
-            face_preproc = DnnFacePreprocessor(
-                model_path=cfg.face_model_path,
-                config_path=cfg.face_config_path,
-                image_size=cfg.image_size,
-                mean=cfg.clip_mean,
-                std=cfg.clip_std,
-                margin_factor=cfg.face_margin,
-                conf_threshold=cfg.face_conf_threshold,
-                dump_dir=cfg.face_dump_dir,
-            )
-        except Exception as e:
-            print(f"WARNING: face detector init failed, fallback to center-crop. Error: {e}")
-            face_preproc = None
+    face_preproc = build_face_preprocessor(cfg)
+    if face_preproc is None and cfg.use_face_detector:
+        print("WARNING: face detector init failed or not configured; using center-crop fallback.")
 
     clf = TorchScriptBinaryClassifier(model_pt=model_pt, device=device)
     pipeline = InferencePipeline(cfg, clf, face_preprocessor=face_preproc)
+    runner = InferenceRunner(cfg, pipeline)
 
-    results = pipeline.run(show_progress=True)
+    results, summary = runner.run(show_progress=True)
     total = len(results)
-    processed = sum(1 for r in results if r.score is not None)
-    skipped = sum(1 for r in results if r.skipped)
-    errors = [r for r in results if r.error]
 
     for idx, res in enumerate(results, 1):
         if res.error:
@@ -67,7 +53,10 @@ def main():
             print(f"[{idx}/{total}] {res.path.name}  fake_prob={res.score:.6f}")
 
     print(f"saved: {cfg.out_csv}")
-    print(f"processed={processed}, skipped={skipped}, errors={len(errors)}")
+    print(
+        f"processed={summary.processed}, skipped={summary.skipped}, "
+        f"errors={summary.errors}, fallback_center_crop={summary.fallback}"
+    )
 
 
 if __name__ == "__main__":
