@@ -212,3 +212,5 @@ train_data/
 #result
 *.csv
 *.pt
+base_model/
+/output

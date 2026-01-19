@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 import torch
 from PIL import Image
-import cv2
 
 IMG_EXTS = {".jpg", ".jpeg", ".jfif", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 VID_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
@@ -28,7 +28,6 @@ def pick_frame_indices(total_frames: int, k: int) -> List[int]:
         return []
     if total_frames <= k:
         return list(range(total_frames))
-    # 균등 샘플링
     return [int(round(i * (total_frames - 1) / (k - 1))) for i in range(k)]
 
 
@@ -71,12 +70,7 @@ def clip_preprocess(
     std: Sequence[float],
 ) -> torch.Tensor:
     """
-    CLIP 표준 전처리:
-    - RGB
-    - shorter side resize to image_size
-    - center crop image_size x image_size
-    - to float tensor [0,1], normalize
-    반환: (3, H, W)
+    CLIP style preprocessing: resize-shorter-side, center crop, normalize.
     """
     img = img.convert("RGB")
     img = _resize_shorter_side(img, image_size)
@@ -94,7 +88,7 @@ def clip_preprocess(
 def read_video_frames_uniform(
     video_path: Path,
     num_frames: int,
-) -> List[Image.Image]:
+) -> List[Tuple[Image.Image, int]]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return []
@@ -102,7 +96,7 @@ def read_video_frames_uniform(
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     idxs = pick_frame_indices(total, num_frames) if total > 0 else []
 
-    frames: List[Image.Image] = []
+    frames: List[Tuple[Image.Image, int]] = []
 
     if idxs:
         for fi in idxs:
@@ -111,17 +105,18 @@ def read_video_frames_uniform(
             if not ok:
                 continue
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
+            frames.append((Image.fromarray(rgb), fi))
     else:
-        # 코덱에 따라 frame count를 못 읽는 경우 대비: 앞에서부터 읽기
         grabbed = 0
+        fi = 0
         while grabbed < num_frames:
             ok, frame = cap.read()
             if not ok:
                 break
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
+            frames.append((Image.fromarray(rgb), fi))
             grabbed += 1
+            fi += 1
 
     cap.release()
     return frames

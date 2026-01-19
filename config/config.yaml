@@ -1,17 +1,25 @@
 test_dir: "test_data"
-out_csv: "submission.csv"
+out_csv: "submission_preprocessed.csv"
 recursive: true
 
-num_frames: 16
+num_frames: 32
 agg: "mean"          # "mean" or "median"
 
-# 전처리
+# 이미지 전처리
 image_size: 224
 clip_mean: [0.48145466, 0.4578275, 0.40821073]
 clip_std:  [0.26862954, 0.26130258, 0.27577711]
 
 # 추론 배치 (영상 프레임 배치)
 frame_batch_size: 16
+
+# 얼굴 검출 / 정렬 (OpenCV DNN)
+use_face_detector: true
+face_margin: 1.3
+face_dump_dir: "output/faces"
+face_model_path: "face_detect_model/res10_300x300_ssd_iter_140000.caffemodel"   # DNN 가중치 경로
+face_config_path: "face_detect_model/deploy.prototxt"                           # DNN prototxt 경로
+face_conf_threshold: 0.5
 
 # 모델
 model_pt: "model/model.pt"
